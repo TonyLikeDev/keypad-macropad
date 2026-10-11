@@ -1,0 +1,23 @@
+// Wiring diagnostic: prints which two of D2..D9 get connected when a key is pressed.
+const byte pins[8] = {9, 8, 7, 6, 5, 4, 3, 2};
+
+void setup() {
+  Serial.begin(9600);
+  for (byte i = 0; i < 8; i++) pinMode(pins[i], INPUT_PULLUP);
+  Serial.println("ready");
+}
+
+void loop() {
+  for (byte i = 0; i < 8; i++) {
+    pinMode(pins[i], OUTPUT);
+    digitalWrite(pins[i], LOW);
+    for (byte j = i + 1; j < 8; j++) {
+      if (digitalRead(pins[j]) == LOW) {
+        Serial.print("D"); Serial.print(pins[i]);
+        Serial.print("-D"); Serial.println(pins[j]);
+      }
+    }
+    pinMode(pins[i], INPUT_PULLUP);
+  }
+  delay(100);
+}
