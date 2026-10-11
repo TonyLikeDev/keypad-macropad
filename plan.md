@@ -175,3 +175,12 @@ The keypad's printed labels are S1-S16 and map to letters in order: S1=a, S2=b .
 | Row 4 | S16 (p) | S12 (l) | S8 (h) | S4 (d) |
 
 Hardware-verified: S1=a (single press), and the four corners S1, S4, S13, S16 gave a, d, m, p. The other 12 positions are inferred from the pattern. (The wiring's own "rows" D9-D6 and "columns" D5-D2 are electrical and don't match this naming.)
+
+### Later changes and findings (2026-10-11, after the pivot)
+- `check_keys.py` and the HID-report sketch are gone (bridge path only). `AutoHotkey` is installed portably in `tools\autohotkey` (it was "not installed yet" earlier in this file).
+- Upload failure: with the keypad wires attached, uploads failed ("not in sync" / "programmer is not responding"). With the Uno-side wires removed the upload worked, and the wires went back on D9 to D2 without trouble. Cause not proven; a wire on D0 or D1 is the likely one.
+- `keypad.ahk` bug caught by validation: `A_LocalAppData` does not exist in AutoHotkey 2.0.30 (it would pop a warning on load). Replaced with `EnvGet("LOCALAPPDATA")`.
+- S3 is now `screenshot.ps1`: saves a PNG of the monitor under the mouse and copies it to the clipboard. Tested on a 1920x1080 landscape monitor and a 768x1366 portrait one (image sizes matched), including the full chain bridge -> AutoHotkey -> script, and the clipboard contents.
+- Volume keys (S8, S12) repeat while held: the Uno sends an uppercase letter every 200 ms after 400 ms; `REPEAT` in `bridge.py` decides which keys honour it.
+- `start_keypad.cmd` now stops old copies first and finds AutoHotkey and Python on other PCs. Not tested: unplug/replug recovery, running at login.
+- Project website in `docs/`, GitHub README at the repo root.
