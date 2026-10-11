@@ -1,0 +1,10 @@
+# Downloaded tools (arduino-cli, AutoHotkey, dfu-programmer): get them from their own sites
+tools/
+# Third-party firmware binaries from the abandoned USB-keyboard route
+firmware/
+# Build output and scratch
+.build/
+.build-diag/
+.test/
+__pycache__/
+*.log

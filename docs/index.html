@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keypad Macropad</title>
+<meta name="description" content="A 4x4 keypad on an Arduino Uno that launches apps and shortcuts on Windows. How it was wired, built, and what went wrong on the way.">
+<style>
+/* One neutral palette, one corner radius (10px), one font family. The four key colours are data, not decoration:
+   they mark the four rows of the keypad (Okabe-Ito colour-blind-safe set) and are always paired with a text label. */
+:root {
+  color-scheme: light dark;
+  --bg: #f3f4f6;
+  --panel: #fafafb;
+  --ink: #15181d;
+  --muted: #4f5663;
+  --line: #d3d8df;
+  --btn-bg: #15181d;
+  --btn-ink: #f3f4f6;
+  --code-bg: #1b2028;
+  --code-ink: #e6e9ee;
+  --code-muted: #98a1af;
+  --pad-body: #1b2028;
+  --keycap: #2b323d;
+  --keytext: #eceff3;
+  --focus: #56b4e9;
+  --win: #0072b2;
+  --app: #d55e00;
+  --edit: #009e73;
+  --media: #cc79a7;
+  --radius: 10px;
+  --shadow: 0 1px 0 rgb(21 24 29 / .05), 0 14px 30px -18px rgb(21 24 29 / .35);
+  --sans: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116;
+    --panel: #151a21;
+    --ink: #e9ebef;
+    --muted: #a3abb8;
+    --line: #2a313b;
+    --btn-bg: #e9ebef;
+    --btn-ink: #0e1116;
+    --code-bg: #0a0d11;
+    --pad-body: #1d232c;
+    --keycap: #2f3743;
+    --shadow: 0 1px 0 rgb(0 0 0 / .4), 0 14px 30px -18px rgb(0 0 0 / .8);
+  }
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: inherit; text-underline-offset: 3px; }
+code, pre { font-family: var(--mono); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 0 20px; }
+section { padding: 88px 0; }
+h1, h2, h3 { margin: 0; line-height: 1.1; letter-spacing: -0.02em; font-weight: 650; }
+h2 { font-size: clamp(1.7rem, 3.2vw, 2.3rem); }
+h3 { font-size: 1.05rem; letter-spacing: -0.01em; line-height: 1.3; }
+.lede { max-width: 62ch; color: var(--muted); margin: 14px 0 0; }
+p { margin: 0; }
+code { background: color-mix(in srgb, var(--ink) 9%, transparent); padding: .1em .4em; border-radius: 6px; font-size: .92em; }
+
+/* Navigation: one line, 64px */
+.nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; flex-wrap: wrap; }
+.brand { font-weight: 650; letter-spacing: -0.01em; text-decoration: none; }
+.nav ul { display: flex; gap: 22px; list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
+.nav a:not(.brand) { text-decoration: none; color: var(--muted); font-size: .95rem; }
+.nav a:not(.brand):hover { color: var(--ink); text-decoration: underline; }
+
+/* Buttons */
+.btn { display: inline-block; padding: 12px 20px; border-radius: var(--radius); font-weight: 600; text-decoration: none; border: 1.5px solid var(--btn-bg); white-space: nowrap; transition: transform .15s ease; }
+.btn:active { transform: translateY(1px) scale(.98); }
+.btn.primary { background: var(--btn-bg); color: var(--btn-ink); }
+.btn.ghost { color: var(--ink); background: transparent; }
+.btn.ghost:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); }
+
+/* Hero */
+.hero { padding: 40px 0 64px; min-height: calc(100dvh - 64px); display: flex; align-items: center; }
+.hero .wrap { display: grid; grid-template-columns: 1.02fr .98fr; gap: 56px; align-items: center; width: 100%; }
+.hero h1 { font-size: clamp(2.2rem, 4.6vw, 3.6rem); line-height: 1.04; letter-spacing: -0.03em; }
+.hero .lede { font-size: 1.1rem; margin-top: 20px; max-width: 46ch; }
+.cta { display: flex; gap: 12px; margin-top: 30px; flex-wrap: wrap; }
+
+/* Keypad */
+.pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; padding: 14px; background: var(--pad-body); border-radius: var(--radius); box-shadow: var(--shadow); }
+.key { --c: var(--win); appearance: none; border: 0; border-radius: var(--radius); background: var(--keycap); color: var(--keytext); font: inherit; text-align: left; padding: 11px 10px 10px; min-height: 86px; cursor: pointer; box-shadow: inset 0 4px 0 var(--c); display: flex; flex-direction: column; justify-content: space-between; gap: 8px; transition: transform .12s ease, background .12s ease; }
+.key:hover { background: color-mix(in srgb, var(--keycap) 82%, white); }
+.key:active { transform: translateY(2px) scale(.98); }
+.key[aria-pressed="true"] { outline: 2px solid var(--c); outline-offset: 2px; background: color-mix(in srgb, var(--keycap) 82%, white); }
+.key .s { font: 600 .74rem/1 var(--mono); opacity: .8; }
+.key .n { font-size: .86rem; line-height: 1.2; font-weight: 600; }
+.g-win { --c: var(--win); } .g-app { --c: var(--app); } .g-edit { --c: var(--edit); } .g-media { --c: var(--media); }
+.detail { margin-top: 16px; min-height: 5.2em; color: var(--ink); font-size: .98rem; max-width: 52ch; }
+.detail strong { font-weight: 650; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 20px; list-style: none; margin: 14px 0 0; padding: 0; color: var(--muted); font-size: .9rem; }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend i { width: 14px; height: 14px; border-radius: 4px; background: var(--c); display: inline-block; }
+
+/* Signal flow */
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); column-gap: 30px; list-style: none; margin: 44px 0 0; padding: 0; }
+.flow li { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 16px; box-shadow: var(--shadow); }
+.flow li:not(:last-child)::after { content: ""; position: absolute; left: 100%; top: 50%; width: 30px; height: 2px; background: repeating-linear-gradient(90deg, var(--ink) 0 6px, transparent 6px 12px); background-size: 12px 2px; }
+.flow h3 { margin-bottom: 8px; }
+.flow p { color: var(--muted); font-size: .92rem; line-height: 1.5; }
+.flow .file { display: block; font: 600 .78rem/1.2 var(--mono); color: var(--muted); margin-bottom: 8px; }
+@media (prefers-reduced-motion: no-preference) {
+  .flow.live li:not(:last-child)::after { animation: march .9s linear infinite; }
+}
+@keyframes march { to { background-position: 12px 0; } }
+
+/* Wiring */
+.wiring { display: grid; grid-template-columns: 1.15fr .85fr; gap: 48px; align-items: center; margin-top: 40px; }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+.diagram svg { width: 100%; height: auto; display: block; }
+.diagram text { fill: var(--ink); font: 13px var(--mono); }
+.diagram .head { font: 600 14px var(--sans); }
+.diagram .wire-row { stroke: var(--ink); stroke-width: 2.5; }
+.diagram .wire-col { stroke: var(--ink); stroke-width: 2.5; stroke-dasharray: 8 6; }
+.diagram .pin { fill: var(--ink); }
+.notes { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px; }
+.notes li { padding-left: 18px; border-left: 3px solid var(--line); }
+.notes strong { display: block; margin-bottom: 2px; }
+.notes span { color: var(--muted); font-size: .95rem; }
+
+/* Customize */
+.codepanel { margin-top: 36px; background: var(--code-bg); color: var(--code-ink); border-radius: var(--radius); padding: 24px; overflow-x: auto; box-shadow: var(--shadow); }
+.codepanel pre { margin: 0; font-size: .9rem; line-height: 1.75; }
+.codepanel .c { color: var(--code-muted); }
+.codepanel .file { display: block; color: var(--code-muted); font: 600 .78rem/1 var(--mono); margin: 22px 0 10px; }
+.codepanel .file:first-child { margin-top: 0; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 30px; }
+.two p { color: var(--muted); }
+.two strong { color: var(--ink); }
+
+/* Story */
+.story { list-style: none; margin: 44px 0 0; padding: 0; max-width: 760px; border-left: 3px solid var(--line); }
+.story li { position: relative; padding: 0 0 34px 28px; }
+.story li:last-child { padding-bottom: 0; }
+.story li::before { content: ""; position: absolute; left: -9px; top: 6px; width: 15px; height: 15px; border-radius: 50%; background: var(--bg); border: 3px solid var(--ink); }
+.story li.fail::before { border-color: var(--app); }
+.story li.ok::before { background: var(--edit); border-color: var(--edit); }
+.story p { color: var(--muted); margin-top: 6px; max-width: 62ch; }
+.lessons { display: grid; grid-template-columns: 1fr 1fr; gap: 30px 48px; margin: 64px 0 0; padding: 0; }
+.lessons div { border-top: 1px solid var(--line); padding-top: 14px; }
+.lessons dt { font-weight: 650; }
+.lessons dd { margin: 6px 0 0; color: var(--muted); font-size: .95rem; }
+
+/* Build */
+.parts { margin-top: 14px; color: var(--muted); max-width: 70ch; }
+.steps { list-style: none; margin: 34px 0 0; padding: 0; }
+.steps li { display: grid; grid-template-columns: 120px 1fr; gap: 24px; padding: 20px 0; border-top: 1px solid var(--line); }
+.steps li:last-child { border-bottom: 1px solid var(--line); }
+.steps h3 { padding-top: 4px; }
+.steps p { color: var(--muted); font-size: .95rem; margin-bottom: 10px; }
+.steps pre { margin: 0; background: var(--code-bg); color: var(--code-ink); padding: 14px 16px; border-radius: var(--radius); overflow-x: auto; font-size: .88rem; line-height: 1.65; }
+
+footer { border-top: 1px solid var(--line); padding: 36px 0 56px; color: var(--muted); font-size: .92rem; }
+footer p + p { margin-top: 6px; }
+
+@media (max-width: 960px) {
+  .flow { grid-template-columns: 1fr; row-gap: 34px; margin-top: 36px; }
+  .flow li:not(:last-child)::after { left: 50%; top: 100%; width: 2px; height: 34px; background: repeating-linear-gradient(180deg, var(--ink) 0 6px, transparent 6px 12px); background-size: 2px 12px; }
+  @keyframes march { to { background-position: 0 12px; } }
+}
+@media (max-width: 800px) {
+  section { padding: 64px 0; }
+  .hero { min-height: 0; padding-top: 28px; }
+  .hero .wrap, .wiring, .two, .lessons { grid-template-columns: 1fr; gap: 32px; }
+  .steps li { grid-template-columns: 1fr; gap: 8px; }
+  .key { min-height: 78px; }
+}
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Page sections">
+  <div class="wrap">
+    <a class="brand" href="#top">Keypad Macropad</a>
+    <ul>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#wiring">Wiring</a></li>
+      <li><a href="#customize">Customize</a></li>
+      <li><a href="#story">What went wrong</a></li>
+      <li><a href="#build">Build it</a></li>
+      <li><a href="https://github.com/TonyLikeDev/keypad-macropad">Source on GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<main id="top">
+
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <h1>A 4x4 keypad that runs anything on your PC</h1>
+      <p class="lede">An Arduino Uno, a keypad and a short script. Change what any key does by editing one text file.</p>
+      <div class="cta">
+        <a class="btn primary" href="#how">See how it works</a>
+        <a class="btn ghost" href="#build">Build your own</a>
+      </div>
+    </div>
+    <div>
+      <div class="pad" role="group" aria-label="The keypad, four rows by four columns. Select a key to see what it does.">
+        <button class="key g-win" type="button" aria-pressed="false" data-s="S13" data-l="m" data-do="Locks the PC"><span class="s">S13</span><span class="n">Lock PC</span></button>
+        <button class="key g-win" type="button" aria-pressed="false" data-s="S9" data-l="i" data-do="Shows the desktop"><span class="s">S9</span><span class="n">Show desktop</span></button>
+        <button class="key g-win" type="button" aria-pressed="false" data-s="S5" data-l="e" data-do="Opens Task View with all your windows"><span class="s">S5</span><span class="n">Task view</span></button>
+        <button class="key g-win" type="button" aria-pressed="false" data-s="S1" data-l="a" data-do="Opens Task Manager"><span class="s">S1</span><span class="n">Task manager</span></button>
+
+        <button class="key g-app" type="button" aria-pressed="false" data-s="S14" data-l="n" data-do="Opens your default browser"><span class="s">S14</span><span class="n">Browser</span></button>
+        <button class="key g-app" type="button" aria-pressed="false" data-s="S10" data-l="j" data-do="Opens File Explorer"><span class="s">S10</span><span class="n">Explorer</span></button>
+        <button class="key g-app" type="button" aria-pressed="false" data-s="S6" data-l="f" data-do="Opens VS Code"><span class="s">S6</span><span class="n">VS Code</span></button>
+        <button class="key g-app" type="button" aria-pressed="false" data-s="S2" data-l="b" data-do="Opens Calculator"><span class="s">S2</span><span class="n">Calculator</span></button>
+
+        <button class="key g-edit" type="button" aria-pressed="false" data-s="S15" data-l="o" data-do="Copies the selection"><span class="s">S15</span><span class="n">Copy</span></button>
+        <button class="key g-edit" type="button" aria-pressed="false" data-s="S11" data-l="k" data-do="Pastes"><span class="s">S11</span><span class="n">Paste</span></button>
+        <button class="key g-edit" type="button" aria-pressed="false" data-s="S7" data-l="g" data-do="Undoes the last change"><span class="s">S7</span><span class="n">Undo</span></button>
+        <button class="key g-edit" type="button" aria-pressed="false" data-s="S3" data-l="c" data-do="Saves a screenshot of the monitor under the mouse and copies it to the clipboard"><span class="s">S3</span><span class="n">Screenshot</span></button>
+
+        <button class="key g-media" type="button" aria-pressed="false" data-s="S16" data-l="p" data-do="Plays or pauses the music"><span class="s">S16</span><span class="n">Play / pause</span></button>
+        <button class="key g-media" type="button" aria-pressed="false" data-s="S12" data-l="l" data-do="Lowers the volume, and keeps lowering while you hold the key"><span class="s">S12</span><span class="n">Volume down</span></button>
+        <button class="key g-media" type="button" aria-pressed="false" data-s="S8" data-l="h" data-do="Raises the volume, and keeps raising while you hold the key"><span class="s">S8</span><span class="n">Volume up</span></button>
+        <button class="key g-media" type="button" aria-pressed="false" data-s="S4" data-l="d" data-do="Mutes the sound"><span class="s">S4</span><span class="n">Mute</span></button>
+      </div>
+      <p class="detail" id="detail" aria-live="polite">Select a key to follow its signal from the keypad to your PC.</p>
+      <ul class="legend" aria-label="Key colours">
+        <li style="--c: var(--win)"><i></i>Row 1: windows</li>
+        <li style="--c: var(--app)"><i></i>Row 2: apps</li>
+        <li style="--c: var(--edit)"><i></i>Row 3: editing</li>
+        <li style="--c: var(--media)"><i></i>Row 4: media</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2>One key press, five hops</h2>
+    <p class="lede">The Uno stays an ordinary Arduino. It only reports which key was pressed. Everything a key actually does lives on the PC.</p>
+    <ol class="flow" id="flow">
+      <li><h3>Keypad</h3><span class="file">16 keys, 8 wires</span><p>A matrix of rows and columns. Pressing a key connects one row wire to one column wire.</p></li>
+      <li><h3>Arduino Uno</h3><span class="file">keypad.ino</span><p>Scans the matrix and sends one letter, a to p, over USB serial at 9600 baud.</p></li>
+      <li><h3>Bridge</h3><span class="file">bridge.py</span><p>Reads the letter and presses Ctrl+Alt+Shift plus that letter, like a very odd keyboard.</p></li>
+      <li><h3>AutoHotkey</h3><span class="file">keypad.ahk</span><p>Catches the combination and runs the action written for that key.</p></li>
+      <li><h3>Your PC</h3><span class="file">the result</span><p>An app opens, a shortcut fires, the volume changes, a screenshot lands on the clipboard.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section id="wiring">
+  <div class="wrap">
+    <h2>Eight wires, no resistors</h2>
+    <p class="lede">The keypad's eight pins go to eight pins on the Uno. The Keypad library turns on the Uno's built-in pull-up resistors, so nothing else is needed.</p>
+    <div class="wiring">
+      <figure class="diagram" style="margin:0">
+        <svg viewBox="0 0 520 340" role="img" aria-labelledby="wd-t wd-d">
+          <title id="wd-t">Wiring between the keypad and the Arduino Uno</title>
+          <desc id="wd-d">Keypad pins 1 to 4 are rows and connect to Uno pins D9, D8, D7 and D6 with solid lines. Keypad pins 5 to 8 are columns and connect to D5, D4, D3 and D2 with dashed lines.</desc>
+          <text class="head" x="40" y="26">Keypad</text>
+          <text class="head" x="388" y="26">Arduino Uno</text>
+          <g>
+            <line class="wire-row" x1="150" y1="58"  x2="370" y2="58"/>
+            <line class="wire-row" x1="150" y1="94"  x2="370" y2="94"/>
+            <line class="wire-row" x1="150" y1="130" x2="370" y2="130"/>
+            <line class="wire-row" x1="150" y1="166" x2="370" y2="166"/>
+            <line class="wire-col" x1="150" y1="202" x2="370" y2="202"/>
+            <line class="wire-col" x1="150" y1="238" x2="370" y2="238"/>
+            <line class="wire-col" x1="150" y1="274" x2="370" y2="274"/>
+            <line class="wire-col" x1="150" y1="310" x2="370" y2="310"/>
+          </g>
+          <g class="pin">
+            <circle cx="150" cy="58" r="5"/><circle cx="150" cy="94" r="5"/><circle cx="150" cy="130" r="5"/><circle cx="150" cy="166" r="5"/>
+            <circle cx="150" cy="202" r="5"/><circle cx="150" cy="238" r="5"/><circle cx="150" cy="274" r="5"/><circle cx="150" cy="310" r="5"/>
+            <circle cx="370" cy="58" r="5"/><circle cx="370" cy="94" r="5"/><circle cx="370" cy="130" r="5"/><circle cx="370" cy="166" r="5"/>
+            <circle cx="370" cy="202" r="5"/><circle cx="370" cy="238" r="5"/><circle cx="370" cy="274" r="5"/><circle cx="370" cy="310" r="5"/>
+          </g>
+          <g text-anchor="end">
+            <text x="138" y="62">Pin 1  row 1</text><text x="138" y="98">Pin 2  row 2</text><text x="138" y="134">Pin 3  row 3</text><text x="138" y="170">Pin 4  row 4</text>
+            <text x="138" y="206">Pin 5  col 1</text><text x="138" y="242">Pin 6  col 2</text><text x="138" y="278">Pin 7  col 3</text><text x="138" y="314">Pin 8  col 4</text>
+          </g>
+          <g>
+            <text x="388" y="62">D9</text><text x="388" y="98">D8</text><text x="388" y="134">D7</text><text x="388" y="170">D6</text>
+            <text x="388" y="206">D5</text><text x="388" y="242">D4</text><text x="388" y="278">D3</text><text x="388" y="314">D2</text>
+          </g>
+        </svg>
+      </figure>
+      <ul class="notes">
+        <li><strong>Solid is rows, dashed is columns</strong><span>Pins 1 to 4 go to D9, D8, D7, D6. Pins 5 to 8 go to D5, D4, D3, D2.</span></li>
+        <li><strong>Keep D0 and D1 empty</strong><span>The Uno uses them to talk to the USB chip. A wire there makes sketch uploads fail with "not in sync".</span></li>
+        <li><strong>The printed labels follow the rows</strong><span>S1 to S16 on the keypad map straight onto the letters a to p, which is how the code names the keys.</span></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="customize">
+  <div class="wrap">
+    <h2>Change a key in one line</h2>
+    <p class="lede">Every key already sends a unique combination. Pointing it at something new means editing a line of text and restarting the script. The Uno is never touched.</p>
+    <div class="codepanel">
+<pre><span class="file">keypad.ahk</span><span class="c">; ^!+ means Ctrl+Alt+Shift. The letter is the key: S1 is a, S2 is b, up to S16 as p.</span>
+^!+b::Run "calc.exe"                    <span class="c">; S2  calculator</span>
+^!+g::Tap "^z"                          <span class="c">; S7  undo</span>
+^!+l::Tap "{Volume_Down 3}"             <span class="c">; S12 volume down</span>
+<span class="file">bridge.py</span>REPEAT = "hl"  <span class="c"># keys that keep firing while held: S8 volume up, S12 volume down</span></pre>
+    </div>
+    <div class="two">
+      <p><strong>Reload after an edit.</strong> Run <code>start_keypad.cmd</code>. It stops the old copies and starts fresh ones, so you can run it as often as you like.</p>
+      <p><strong>Hold to repeat.</strong> The Uno sends an uppercase letter every 0.2 seconds once a key is held for 0.4 seconds. The bridge only acts on those repeats for keys listed in <code>REPEAT</code>, so holding Calculator does not open fifty calculators.</p>
+    </div>
+  </div>
+</section>
+
+<section id="story">
+  <div class="wrap">
+    <h2>What went wrong, honestly</h2>
+    <p class="lede">The first plan did not work. The second one did, and it ended up simpler.</p>
+    <ol class="story">
+      <li>
+        <h3>The plan: make the Uno a real USB keyboard</h3>
+        <p>The Uno has a second chip that handles USB. Reflash it with keyboard firmware and the board appears as a keyboard, with no PC software at all.</p>
+      </li>
+      <li class="fail">
+        <h3>The firmware had vanished</h3>
+        <p>The original download links are dead and the copies left online differ from each other and target an older chip. So the firmware was built from source for the Uno's ATmega16U2. It came to 3,826 bytes.</p>
+      </li>
+      <li class="fail">
+        <h3>The USB chip refused to enter flash mode</h3>
+        <p>Touching RESET to GND on its header should put it in DFU mode. Twice the chip reset (the COM port vanished and Windows played the unplug sound) but it came back as a normal Uno, and Windows never saw a flash-mode device. Nothing was written to the board.</p>
+      </li>
+      <li class="ok">
+        <h3>The pivot: leave the Uno alone</h3>
+        <p>The Uno sends a letter per key, a small Python script turns it into a key combination, and AutoHotkey runs the action. Same goal, nothing to flash, and the key map is a text file.</p>
+      </li>
+    </ol>
+    <dl class="lessons">
+      <div><dt>A wire in the wrong hole</dt><dd>With the keypad wired into D0 and D1, uploads failed with "programmer is not responding". Moving the wires to D9 through D2 fixed it.</dd></div>
+      <div><dt>Labels that are not a grid</dt><dd>The S numbers run along the electrical rows, not down the columns. Pressing the four corners showed S1 is a, S4 is d, S13 is m and S16 is p.</dd></div>
+      <div><dt>A variable that does not exist</dt><dd>AutoHotkey 2.0.30 has no <code>A_LocalAppData</code>, so the VS Code key would have shown a warning on every load. Validating the file caught it.</dd></div>
+      <div><dt>Screens are not all the same size</dt><dd>The screenshot key needed a DPI fix to capture the right pixels, and was tested on a 1920 x 1080 monitor and a 768 x 1366 portrait one.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section id="build">
+  <div class="wrap">
+    <h2>Build your own</h2>
+    <p class="parts">You need an Arduino Uno R3, a 4x4 membrane keypad, eight jumper wires, a USB cable and a Windows PC.</p>
+    <ol class="steps">
+      <li>
+        <h3>Wire</h3>
+        <div><p>Connect keypad pins 1 to 8 to D9, D8, D7, D6, D5, D4, D3, D2, as in the diagram above.</p></div>
+      </li>
+      <li>
+        <h3>Upload</h3>
+        <div><p>Install the Keypad library and upload the sketch. Use your own port name in place of COM3.</p>
+<pre>arduino-cli lib install Keypad
+arduino-cli compile --upload -p COM3 --fqbn arduino:avr:uno keypad</pre></div>
+      </li>
+      <li>
+        <h3>Install</h3>
+        <div><p>Get Python's serial library, then unzip the portable AutoHotkey v2 into <code>tools\autohotkey</code>.</p>
+<pre>pip install pyserial</pre></div>
+      </li>
+      <li>
+        <h3>Run</h3>
+        <div><p>Start the hotkey script and the bridge together. Press S2 and Calculator opens.</p>
+<pre>start_keypad.cmd</pre></div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Made with an Arduino Uno, the Keypad library, pyserial and AutoHotkey v2. The code is on <a href="https://github.com/TonyLikeDev/keypad-macropad">GitHub</a>.</p>
+    <p>Windows only: the bridge and the hotkey script use Windows features. The Uno sketch works anywhere.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var keys = document.querySelectorAll('.key');
+  var detail = document.getElementById('detail');
+  keys.forEach(function (k) {
+    k.addEventListener('click', function () {
+      keys.forEach(function (o) { o.setAttribute('aria-pressed', 'false'); });
+      k.setAttribute('aria-pressed', 'true');
+      var l = k.dataset.l;
+      detail.innerHTML = '<strong>' + k.dataset.s + '</strong> sends <code>' + l + '</code>. The bridge presses <code>Ctrl+Alt+Shift+' + l.toUpperCase() + '</code>. AutoHotkey then ' + k.dataset.do.charAt(0).toLowerCase() + k.dataset.do.slice(1) + '.';
+    });
+  });
+  var flow = document.getElementById('flow');
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(function (e) { flow.classList.toggle('live', e[0].isIntersecting); }, { threshold: 0.3 }).observe(flow);
+  }
+})();
+</script>
+</body>
+</html>
